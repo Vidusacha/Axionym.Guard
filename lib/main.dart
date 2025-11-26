@@ -1,28 +1,27 @@
-import 'dart:convert'; // For JSON processing
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Added for Clipboard
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:http/http.dart' as http;
 
 // Firebase Imports
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-// FIX: Aliasing the import to prevent "ambiguous_import" errors
 import 'firebase_options.dart' as fb_options;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(
-    // FIX: Explicitly using the aliased name
     options: fb_options.DefaultFirebaseOptions.currentPlatform,
   );
 
   await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-    appleProvider: AppleProvider.debug,
+    providerAndroid: AndroidDebugProvider(),
+    providerApple: AppleDebugProvider(),
+    // Web provider is required to prevent crashes on web builds
+    providerWeb: ReCaptchaV3Provider('recaptcha-v3-site-key'),
   );
 
   runApp(const AxionymApp());
@@ -51,7 +50,6 @@ class AxionymApp extends StatelessWidget {
           ThemeData.dark().textTheme,
         ),
       ),
-      // Direct access, no AuthGate as requested
       home: const MainLayout(),
     );
   }
@@ -168,7 +166,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   final List<Widget> _screens = [
     const SafetyCheckupTab(),
-    const AnalyzeTab(), // UPDATED: Single input, multi-result
+    const AnalyzeTab(),
     const RadarTab(),
     const ReportTab(),
   ];
@@ -198,6 +196,7 @@ class _MainLayoutState extends State<MainLayout> {
                   TextSpan(
                       text: '.GUARD',
                       style: TextStyle(color: Color(0xFF06B6D4))),
+                  // v2.0 Label added here
                   TextSpan(
                       text: ' v2.0',
                       style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
@@ -238,6 +237,7 @@ class _MainLayoutState extends State<MainLayout> {
                 icon: Icon(LucideIcons.clipboardCheck), label: 'CHECKUP'),
             NavigationDestination(
                 icon: Icon(LucideIcons.microscope), label: 'ANALYZE'),
+            // Changed icon to RADAR
             NavigationDestination(
                 icon: Icon(LucideIcons.radar), label: 'RADAR'),
             NavigationDestination(
@@ -303,7 +303,6 @@ class _SafetyCheckupTabState extends State<SafetyCheckupTab> {
     if (isYes) {
       _riskScore += weight;
     }
-
     if (_currentQuestionIndex < _questions.length - 1) {
       setState(() => _currentQuestionIndex++);
     } else {
@@ -500,70 +499,78 @@ class AnalysisResult {
 class _AnalyzeTabState extends State<AnalyzeTab> {
   final _controller = TextEditingController();
   bool _isLoading = false;
-  List<AnalysisResult> _results = [];
+  bool _hasResults = false; // To switch view
 
-  // Placeholder API Key
-  static const String _apiKey = '';
+  // Categorized Results
+  final Map<String, List<AnalysisResult>> _categorizedResults = {
+    'URL': [],
+    'PHONE': [],
+    'TEXT': [],
+  };
 
-  // --- PARSING LOGIC (MOCK BACKEND) ---
-  Future<void> _runAnalyze() async {
+  // --- PASTE FUNCTION ---
+  Future<void> _pasteContent() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data != null && data.text != null) {
+      setState(() {
+        _controller.text = data.text!;
+      });
+    }
+  }
+
+  void _runAnalyze() async {
     final input = _controller.text.trim();
-    if (input.isEmpty) return;
+    if (input.isEmpty) {
+      return;
+    }
 
     setState(() {
       _isLoading = true;
-      _results = []; // Clear previous
+      _hasResults = false;
+      _categorizedResults['URL']!.clear();
+      _categorizedResults['PHONE']!.clear();
+      _categorizedResults['TEXT']!.clear();
     });
 
-    await Future.delayed(const Duration(seconds: 2)); // Simulate network
+    // Simulate processing delay
+    await Future.delayed(const Duration(seconds: 1));
 
-    List<AnalysisResult> newResults = [];
-
-    // 1. Extract & Check URLs
-    // Simple Regex for demo
+    // 1. Parse URLs
     final urlRegExp = RegExp(r'(https?:\/\/[^\s]+)');
     final urls = urlRegExp.allMatches(input);
-
-    if (urls.isNotEmpty) {
-      for (var match in urls) {
-        final url = match.group(0)!;
-        // Mock Check
-        bool isSafe = !url.contains('virus') && !url.contains('test');
-        newResults.add(AnalysisResult('URL DETECTED', url,
-            isSafe ? 'VERIFIED SAFE' : 'CRITICAL THREAT DETECTED', isSafe));
-      }
+    for (var match in urls) {
+      final url = match.group(0)!;
+      bool isSafe = !url.contains('virus') && !url.contains('test');
+      _categorizedResults['URL']!.add(AnalysisResult('URL', url,
+          isSafe ? 'VERIFIED SAFE' : 'POTENTIAL THREAT DETECTED', isSafe));
     }
 
-    // 2. Extract & Check Phones
-    // Basic global phone regex (plus, digits, spaces/dashes)
+    // 2. Parse Phones
     final phoneRegExp = RegExp(r'\+?[\d\-\(\)\s]{7,15}');
-    // Filter to ensure it has enough digits
     final potentialPhones = phoneRegExp
         .allMatches(input)
         .where((m) => m.group(0)!.replaceAll(RegExp(r'\D'), '').length >= 7);
-
-    if (potentialPhones.isNotEmpty) {
-      for (var match in potentialPhones) {
-        final phone = match.group(0)!.trim();
-        // Mock Check
-        bool isSafe = !phone.endsWith('666');
-        newResults.add(AnalysisResult('PHONE DETECTED', phone,
-            isSafe ? 'NO SPAM REPORTS' : 'FLAGGED AS SCAM', isSafe));
-      }
+    for (var match in potentialPhones) {
+      final phone = match.group(0)!.trim();
+      bool isSafe = !phone.endsWith('666'); // Mock logic
+      _categorizedResults['PHONE']!.add(AnalysisResult('PHONE', phone,
+          isSafe ? 'NO SPAM REPORTS' : 'FLAGGED AS SCAM', isSafe));
     }
 
-    // 3. Analyze Text Content (Always do this if it's long enough)
-    if (input.length > 5) {
-      // Mock NLP
-      bool isSafe = !input.toLowerCase().contains('winner') &&
-          !input.toLowerCase().contains('urgent');
-      newResults.add(AnalysisResult('TEXT ANALYSIS', 'Semantic Content Scan',
-          isSafe ? 'NEUTRAL INTENT' : 'SOCIAL ENGINEERING DETECTED', isSafe));
+    // 3. Parse Text (Semantic)
+    if (input.isNotEmpty) {
+      bool isSafe = !input.toLowerCase().contains('urgent') &&
+          !input.toLowerCase().contains('winner');
+      _categorizedResults['TEXT']!.add(AnalysisResult(
+          'TEXT',
+          'Content Analysis',
+          isSafe ? 'NEUTRAL INTENT' : 'SOCIAL ENGINEERING PATTERN',
+          isSafe));
     }
 
     setState(() {
       _isLoading = false;
-      _results = newResults;
+      _hasResults = true;
     });
   }
 
@@ -574,22 +581,48 @@ class _AnalyzeTabState extends State<AnalyzeTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'THREAT ANALYZER',
-            style: GoogleFonts.robotoMono(
-                fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+          // Header Row with Paste Button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'THREAT ANALYZER',
+                style: GoogleFonts.robotoMono(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
+              ),
+              // PASTE BUTTON
+              OutlinedButton.icon(
+                onPressed: _pasteContent,
+                icon: const Icon(LucideIcons.clipboard,
+                    size: 16, color: Color(0xFF06B6D4)),
+                label: Text('PASTE',
+                    style: GoogleFonts.robotoMono(
+                        color: const Color(0xFF06B6D4),
+                        fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFF06B6D4), width: 1),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+            ],
           ),
+
           const SizedBox(height: 8),
           const Text(
-              'Paste any content (SMS, Link, Number). System will parse and verify all components.',
+              'Paste suspicious content (SMS, Link, Number) for deep inspection.',
               style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 24),
 
-          // Single Input Area
+          // INPUT AREA
           TextField(
             controller: _controller,
             style: const TextStyle(color: Colors.white),
-            maxLines: 5,
+            maxLines: 4,
             decoration: const InputDecoration(
               hintText: 'PASTE CONTENT HERE...',
               hintStyle: TextStyle(color: Colors.grey),
@@ -625,82 +658,126 @@ class _AnalyzeTabState extends State<AnalyzeTab> {
             ),
           ),
 
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
 
-          // RESULTS LIST
-          if (_results.isNotEmpty)
+          // RESULTS AREA (TABS)
+          if (_hasResults && !_isLoading)
             Expanded(
-              child: ListView.separated(
-                itemCount: _results.length,
-                separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final res = _results[index];
-                  return Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: res.isSafe
-                          ? Colors.green.withValues(alpha: 0.1)
-                          : Colors.red.withValues(alpha: 0.1),
-                      border: Border.all(
-                          color: res.isSafe ? Colors.green : Colors.red,
-                          width: 0.5),
-                      borderRadius: BorderRadius.circular(4),
+              child: DefaultTabController(
+                length: 3,
+                child: Column(
+                  children: [
+                    // Result Tabs
+                    Container(
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: TabBar(
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicator: BoxDecoration(
+                          color: const Color(0xFF1E293B),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: const Color(0xFF06B6D4)
+                                  .withValues(alpha: 0.5)),
+                        ),
+                        labelColor: const Color(0xFF06B6D4),
+                        unselectedLabelColor: Colors.grey,
+                        labelStyle: GoogleFonts.robotoMono(
+                            fontWeight: FontWeight.bold, fontSize: 12),
+                        tabs: [
+                          Tab(
+                              text:
+                                  'URL (${_categorizedResults['URL']!.length})'),
+                          Tab(
+                              text:
+                                  'PHONE (${_categorizedResults['PHONE']!.length})'),
+                          Tab(text: 'TEXT'),
+                        ],
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              _getIconForType(res.type),
-                              size: 16,
-                              color: res.isSafe ? Colors.green : Colors.red,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              res.type,
-                              style: GoogleFonts.robotoMono(
-                                color: res.isSafe ? Colors.green : Colors.red,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          res.value,
-                          style: GoogleFonts.robotoMono(
-                              color: Colors.white, fontSize: 14),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          res.status,
-                          style: GoogleFonts.robotoMono(
-                            color: res.isSafe ? Colors.green : Colors.red,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 16),
+
+                    // Tab Views
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          _buildResultList(_categorizedResults['URL']!),
+                          _buildResultList(_categorizedResults['PHONE']!),
+                          _buildResultList(_categorizedResults['TEXT']!),
+                        ],
+                      ),
                     ),
-                  );
-                },
+                  ],
+                ),
               ),
             )
-          else if (!_isLoading && _controller.text.isNotEmpty)
-            // Placeholder if nothing found or before first scan
+          else if (!_isLoading)
+            // Placeholder
             const Spacer(),
         ],
       ),
     );
   }
 
-  IconData _getIconForType(String type) {
-    if (type.contains('URL')) return LucideIcons.link;
-    if (type.contains('PHONE')) return LucideIcons.phone;
-    return LucideIcons.alignLeft;
+  Widget _buildResultList(List<AnalysisResult> results) {
+    if (results.isEmpty) {
+      return Center(
+          child: Text('No data found in this category.',
+              style: GoogleFonts.robotoMono(color: Colors.grey)));
+    }
+    return ListView.separated(
+      itemCount: results.length,
+      separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final res = results[index];
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: res.isSafe
+                ? Colors.green.withValues(alpha: 0.1)
+                : Colors.red.withValues(alpha: 0.1),
+            border: Border.all(
+                color: res.isSafe ? Colors.green : Colors.red, width: 0.5),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                res.value,
+                style:
+                    GoogleFonts.robotoMono(color: Colors.white, fontSize: 14),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(
+                    res.isSafe
+                        ? LucideIcons.checkCircle
+                        : LucideIcons.alertTriangle,
+                    size: 14,
+                    color: res.isSafe ? Colors.green : Colors.red,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    res.status,
+                    style: GoogleFonts.robotoMono(
+                        color: res.isSafe ? Colors.green : Colors.red,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
