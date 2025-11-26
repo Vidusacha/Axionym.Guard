@@ -1,22 +1,25 @@
+import 'dart:convert'; // For JSON processing
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:http/http.dart' as http;
 
 // Firebase Imports
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'firebase_options.dart';
+// FIX: Aliasing the import to prevent "ambiguous_import" errors
+import 'firebase_options.dart' as fb_options;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+    // FIX: Explicitly using the aliased name
+    options: fb_options.DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Fixed: Updated to new API parameter names (providerAndroid / providerApple)
   await FirebaseAppCheck.instance.activate(
     androidProvider: AndroidProvider.debug,
     appleProvider: AppleProvider.debug,
@@ -48,6 +51,7 @@ class AxionymApp extends StatelessWidget {
           ThemeData.dark().textTheme,
         ),
       ),
+      // Direct access, no AuthGate as requested
       home: const MainLayout(),
     );
   }
@@ -112,7 +116,6 @@ class _LogoPainter extends CustomPainter {
 }
 
 // --- HELPER: CUSTOM SNACKBAR ---
-// This creates a consistent "Tech" look for all notifications
 void showAxionymSnackBar(BuildContext context,
     {required String message, required bool isError}) {
   ScaffoldMessenger.of(context).showSnackBar(
@@ -121,9 +124,7 @@ void showAxionymSnackBar(BuildContext context,
         children: [
           Icon(
             isError ? LucideIcons.alertTriangle : LucideIcons.checkCircle,
-            color: isError
-                ? const Color(0xFFEF4444)
-                : const Color(0xFF10B981), // Red vs Emerald Green
+            color: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -138,15 +139,13 @@ void showAxionymSnackBar(BuildContext context,
           ),
         ],
       ),
-      backgroundColor: const Color(0xFF0F172A), // Slate-900 (Dark)
-      behavior: SnackBarBehavior.floating, // Floats above bottom
-      margin: const EdgeInsets.all(16), // Space around
+      backgroundColor: const Color(0xFF0F172A),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isError
-              ? const Color(0xFFEF4444)
-              : const Color(0xFF10B981), // Colored Border
+          color: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
           width: 1,
         ),
       ),
@@ -169,7 +168,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   final List<Widget> _screens = [
     const SafetyCheckupTab(),
-    const ScanTab(),
+    const AnalyzeTab(), // UPDATED: Single input, multi-result
     const RadarTab(),
     const ReportTab(),
   ];
@@ -211,7 +210,6 @@ class _MainLayoutState extends State<MainLayout> {
           IconButton(
             icon: const Icon(LucideIcons.bell, color: Color(0xFF94A3B8)),
             onPressed: () {
-              // Example of the new SnackBar design
               showAxionymSnackBar(context,
                   message: 'System Active. Monitoring enabled.',
                   isError: false);
@@ -239,7 +237,7 @@ class _MainLayoutState extends State<MainLayout> {
             NavigationDestination(
                 icon: Icon(LucideIcons.clipboardCheck), label: 'CHECKUP'),
             NavigationDestination(
-                icon: Icon(LucideIcons.search), label: 'SCAN'),
+                icon: Icon(LucideIcons.microscope), label: 'ANALYZE'),
             NavigationDestination(
                 icon: Icon(LucideIcons.radar), label: 'RADAR'),
             NavigationDestination(
@@ -366,9 +364,8 @@ class _SafetyCheckupTabState extends State<SafetyCheckupTab> {
           .orderBy('order')
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
+        if (snapshot.hasError)
           return Center(child: Text('Error: ${snapshot.error}'));
-        }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
               child: CircularProgressIndicator(color: Color(0xFF06B6D4)));
@@ -481,28 +478,92 @@ class _SafetyCheckupTabState extends State<SafetyCheckupTab> {
   }
 }
 
-// --- 2. SCAN TAB ---
+// --- 2. ANALYZE TAB (SINGLE INPUT, MULTI-PARSER) ---
 
-class ScanTab extends StatefulWidget {
-  const ScanTab({super.key});
+class AnalyzeTab extends StatefulWidget {
+  const AnalyzeTab({super.key});
 
   @override
-  State<ScanTab> createState() => _ScanTabState();
+  State<AnalyzeTab> createState() => _AnalyzeTabState();
 }
 
-class _ScanTabState extends State<ScanTab> {
-  final _controller = TextEditingController();
-  String _status = '';
+// Result Model
+class AnalysisResult {
+  final String type; // URL, PHONE, TEXT
+  final String value;
+  final String status;
+  final bool isSafe;
 
-  void _runScan() {
-    setState(() => _status = 'SCANNING...');
-    Future.delayed(const Duration(seconds: 2), () {
-      setState(() {
-        final input = _controller.text;
-        _status = (input.contains('http') || input.length > 10)
-            ? 'CRITICAL THREAT DETECTED'
-            : 'VERIFIED SAFE';
-      });
+  AnalysisResult(this.type, this.value, this.status, this.isSafe);
+}
+
+class _AnalyzeTabState extends State<AnalyzeTab> {
+  final _controller = TextEditingController();
+  bool _isLoading = false;
+  List<AnalysisResult> _results = [];
+
+  // Placeholder API Key
+  static const String _apiKey = '';
+
+  // --- PARSING LOGIC (MOCK BACKEND) ---
+  Future<void> _runAnalyze() async {
+    final input = _controller.text.trim();
+    if (input.isEmpty) return;
+
+    setState(() {
+      _isLoading = true;
+      _results = []; // Clear previous
+    });
+
+    await Future.delayed(const Duration(seconds: 2)); // Simulate network
+
+    List<AnalysisResult> newResults = [];
+
+    // 1. Extract & Check URLs
+    // Simple Regex for demo
+    final urlRegExp = RegExp(r'(https?:\/\/[^\s]+)');
+    final urls = urlRegExp.allMatches(input);
+
+    if (urls.isNotEmpty) {
+      for (var match in urls) {
+        final url = match.group(0)!;
+        // Mock Check
+        bool isSafe = !url.contains('virus') && !url.contains('test');
+        newResults.add(AnalysisResult('URL DETECTED', url,
+            isSafe ? 'VERIFIED SAFE' : 'CRITICAL THREAT DETECTED', isSafe));
+      }
+    }
+
+    // 2. Extract & Check Phones
+    // Basic global phone regex (plus, digits, spaces/dashes)
+    final phoneRegExp = RegExp(r'\+?[\d\-\(\)\s]{7,15}');
+    // Filter to ensure it has enough digits
+    final potentialPhones = phoneRegExp
+        .allMatches(input)
+        .where((m) => m.group(0)!.replaceAll(RegExp(r'\D'), '').length >= 7);
+
+    if (potentialPhones.isNotEmpty) {
+      for (var match in potentialPhones) {
+        final phone = match.group(0)!.trim();
+        // Mock Check
+        bool isSafe = !phone.endsWith('666');
+        newResults.add(AnalysisResult('PHONE DETECTED', phone,
+            isSafe ? 'NO SPAM REPORTS' : 'FLAGGED AS SCAM', isSafe));
+      }
+    }
+
+    // 3. Analyze Text Content (Always do this if it's long enough)
+    if (input.length > 5) {
+      // Mock NLP
+      bool isSafe = !input.toLowerCase().contains('winner') &&
+          !input.toLowerCase().contains('urgent');
+      newResults.add(AnalysisResult('TEXT ANALYSIS', 'Semantic Content Scan',
+          isSafe ? 'NEUTRAL INTENT' : 'SOCIAL ENGINEERING DETECTED', isSafe));
+    }
+
+    setState(() {
+      _isLoading = false;
+      _results = newResults;
     });
   }
 
@@ -514,81 +575,132 @@ class _ScanTabState extends State<ScanTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'DEEP SCAN',
+            'THREAT ANALYZER',
             style: GoogleFonts.robotoMono(
                 fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 8),
-          const Text('Verify digital footprint integrity.',
+          const Text(
+              'Paste any content (SMS, Link, Number). System will parse and verify all components.',
               style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
+
+          // Single Input Area
           TextField(
             controller: _controller,
             style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'ENTER TARGET DATA...',
-              hintStyle: const TextStyle(color: Colors.grey),
+            maxLines: 5,
+            decoration: const InputDecoration(
+              hintText: 'PASTE CONTENT HERE...',
+              hintStyle: TextStyle(color: Colors.grey),
               filled: true,
-              fillColor: const Color(0xFF0F172A),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none),
-              focusedBorder: const OutlineInputBorder(
+              fillColor: Color(0xFF0F172A),
+              border: OutlineInputBorder(borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(
                   borderSide: BorderSide(color: Color(0xFF06B6D4))),
             ),
           ),
+
           const SizedBox(height: 16),
+
           SizedBox(
             width: double.infinity,
             height: 50,
             child: ElevatedButton.icon(
-              icon: const Icon(LucideIcons.search, size: 18),
-              label: const Text('INIT GUARD PROTOCOL'),
+              icon: _isLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(LucideIcons.microscope, size: 18),
+              label: Text(_isLoading ? 'PROCESSING...' : 'ANALYZE'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF06B6D4),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
-              onPressed: _runScan,
+              onPressed: _isLoading ? null : _runAnalyze,
             ),
           ),
+
           const SizedBox(height: 32),
-          if (_status.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: _status.contains('SAFE')
-                    ? Colors.green.withValues(alpha: 0.1)
-                    : Colors.red.withValues(alpha: 0.1),
-                border: Border.all(
-                    color: _status.contains('SAFE') ? Colors.green : Colors.red,
-                    width: 0.5),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _status.contains('SAFE')
-                        ? LucideIcons.checkCircle
-                        : LucideIcons.alertTriangle,
-                    color: _status.contains('SAFE') ? Colors.green : Colors.red,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _status,
-                    style: GoogleFonts.robotoMono(
-                      color:
-                          _status.contains('SAFE') ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.bold,
+
+          // RESULTS LIST
+          if (_results.isNotEmpty)
+            Expanded(
+              child: ListView.separated(
+                itemCount: _results.length,
+                separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  final res = _results[index];
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: res.isSafe
+                          ? Colors.green.withValues(alpha: 0.1)
+                          : Colors.red.withValues(alpha: 0.1),
+                      border: Border.all(
+                          color: res.isSafe ? Colors.green : Colors.red,
+                          width: 0.5),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                  ),
-                ],
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _getIconForType(res.type),
+                              size: 16,
+                              color: res.isSafe ? Colors.green : Colors.red,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              res.type,
+                              style: GoogleFonts.robotoMono(
+                                color: res.isSafe ? Colors.green : Colors.red,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          res.value,
+                          style: GoogleFonts.robotoMono(
+                              color: Colors.white, fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          res.status,
+                          style: GoogleFonts.robotoMono(
+                            color: res.isSafe ? Colors.green : Colors.red,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            ),
+            )
+          else if (!_isLoading && _controller.text.isNotEmpty)
+            // Placeholder if nothing found or before first scan
+            const Spacer(),
         ],
       ),
     );
+  }
+
+  IconData _getIconForType(String type) {
+    if (type.contains('URL')) return LucideIcons.link;
+    if (type.contains('PHONE')) return LucideIcons.phone;
+    return LucideIcons.alignLeft;
   }
 }
 

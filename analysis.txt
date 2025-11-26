@@ -1,15 +1,73 @@
 Analyzing Axionym.Guard...                                      
 
-  error - The method 'jetbrainsMonoTextTheme' isn't defined for the type 'GoogleFonts' - lib\main.dart:28:32 - undefined_method
-   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:139:50 - deprecated_member_use
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:147:36 - undefined_method
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:192:25 - undefined_method
-   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:202:51 - deprecated_member_use
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:246:32 - undefined_method
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:291:32 - undefined_method
-   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:343:36 - deprecated_member_use
-   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:344:34 - deprecated_member_use
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:362:40 - undefined_method
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:385:28 - undefined_method
-  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:399:28 - undefined_method
+   info - 'androidProvider' is deprecated and shouldn't be used. Use providerAndroid instead. This parameter will be removed in a future major release - lib\main.dart:24:5 - deprecated_member_use
+   info - 'appleProvider' is deprecated and shouldn't be used. Use providerApple instead. This parameter will be removed in a future major release - lib\main.dart:25:5 - deprecated_member_use
+  error - Classes can only extend other classes - lib\main.dart:31:26 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:32:27 - super_formal_parameter_without_associated_named
+  error - Undefined class 'Widget' - lib\main.dart:35:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:35:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:35:16 - undefined_class
+  error - Classes can only extend other classes - lib\main.dart:62:27 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:64:28 - super_formal_parameter_without_associated_named
+  error - Undefined class 'Widget' - lib\main.dart:67:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:67:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:67:16 - undefined_class
+  error - Undefined class 'BuildContext' - lib\main.dart:119:26 - undefined_class
+  error - Classes can only extend other classes - lib\main.dart:159:26 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:160:27 - super_formal_parameter_without_associated_named
+  error - Undefined class 'State' - lib\main.dart:163:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:163:21 - override_on_non_overriding_member
+  error - Classes can only extend other classes - lib\main.dart:166:32 - extends_non_class
+  error - The name 'Widget' isn't a type, so it can't be used as a type argument - lib\main.dart:169:14 - non_type_as_type_argument
+  error - Undefined class 'Widget' - lib\main.dart:177:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:177:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:177:16 - undefined_class
+  error - The method 'setState' isn't defined for the type '_MainLayoutState' - lib\main.dart:233:43 - undefined_method
+  error - Classes can only extend other classes - lib\main.dart:254:32 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:255:33 - super_formal_parameter_without_associated_named
+  error - Undefined class 'State' - lib\main.dart:258:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:258:27 - override_on_non_overriding_member
+  error - Classes can only extend other classes - lib\main.dart:261:38 - extends_non_class
+  error - The method 'setState' isn't defined for the type '_SafetyCheckupTabState' - lib\main.dart:299:5 - undefined_method
+  error - The method 'setState' isn't defined for the type '_SafetyCheckupTabState' - lib\main.dart:308:7 - undefined_method
+  error - The method 'setState' isn't defined for the type '_SafetyCheckupTabState' - lib\main.dart:310:7 - undefined_method
+  error - The method 'setState' isn't defined for the type '_SafetyCheckupTabState' - lib\main.dart:315:5 - undefined_method
+  error - Undefined class 'Widget' - lib\main.dart:323:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:323:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:323:16 - undefined_class
+   info - Statements in an if should be enclosed in a block - lib\main.dart:368:11 - curly_braces_in_flow_control_structures
+  error - Classes can only extend other classes - lib\main.dart:483:26 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:484:27 - super_formal_parameter_without_associated_named
+  error - Undefined class 'State' - lib\main.dart:487:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:487:21 - override_on_non_overriding_member
+  error - Classes can only extend other classes - lib\main.dart:500:32 - extends_non_class
+warning - The value of the field '_apiKey' isn't used - lib\main.dart:506:23 - unused_field
+  error - The method 'setState' isn't defined for the type '_AnalyzeTabState' - lib\main.dart:513:5 - undefined_method
+  error - The method 'setState' isn't defined for the type '_AnalyzeTabState' - lib\main.dart:564:5 - undefined_method
+  error - Undefined class 'Widget' - lib\main.dart:571:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:571:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:571:16 - undefined_class
+  error - Classes can only extend other classes - lib\main.dart:709:24 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:710:25 - super_formal_parameter_without_associated_named
+  error - Undefined class 'Widget' - lib\main.dart:713:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:713:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:713:16 - undefined_class
+  error - Classes can only extend other classes - lib\main.dart:877:25 - extends_non_class
+  error - Undefined class 'Widget' - lib\main.dart:886:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:886:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:886:16 - undefined_class
+  error - Classes can only extend other classes - lib\main.dart:918:25 - extends_non_class
+  error - No associated named super constructor parameter - lib\main.dart:919:26 - super_formal_parameter_without_associated_named
+  error - Undefined class 'State' - lib\main.dart:922:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:922:20 - override_on_non_overriding_member
+  error - Classes can only extend other classes - lib\main.dart:925:31 - extends_non_class
+  error - The method 'setState' isn't defined for the type '_ReportTabState' - lib\main.dart:934:5 - undefined_method
+  error - Undefined name 'mounted' - lib\main.dart:944:12 - undefined_identifier
+  error - Undefined name 'context' - lib\main.dart:951:27 - undefined_identifier
+  error - Undefined name 'context' - lib\main.dart:955:27 - undefined_identifier
+  error - Undefined name 'mounted' - lib\main.dart:958:11 - undefined_identifier
+  error - The method 'setState' isn't defined for the type '_ReportTabState' - lib\main.dart:959:9 - undefined_method
+  error - Undefined class 'Widget' - lib\main.dart:965:3 - undefined_class
+warning - The method doesn't override an inherited method - lib\main.dart:965:10 - override_on_non_overriding_member
+  error - Undefined class 'BuildContext' - lib\main.dart:965:16 - undefined_class
 
