@@ -1,0 +1,46 @@
+Running Gradle task 'assembleRelease'...                        
+lib/main.dart:42:32: Error: Member not found: 'GoogleFonts.jetbrainsMonoTextTheme'.
+        textTheme: GoogleFonts.jetbrainsMonoTextTheme(
+                               ^^^^^^^^^^^^^^^^^^^^^^
+lib/main.dart:147:36: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+                style: GoogleFonts.jetbrainsMono(
+                                   ^^^^^^^^^^^^^
+lib/main.dart:187:25: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+            GoogleFonts.jetbrainsMono(
+                        ^^^^^^^^^^^^^
+lib/main.dart:228:32: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+            style: GoogleFonts.jetbrainsMono(color: Colors.white, fontSize: 18),
+                               ^^^^^^^^^^^^^
+lib/main.dart:272:32: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+            style: GoogleFonts.jetbrainsMono(
+                               ^^^^^^^^^^^^^
+lib/main.dart:334:40: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+                    style: GoogleFonts.jetbrainsMono(
+                                       ^^^^^^^^^^^^^
+lib/main.dart:357:28: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+        style: GoogleFonts.jetbrainsMono(color: Colors.grey),
+                           ^^^^^^^^^^^^^
+lib/main.dart:418:32: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+            style: GoogleFonts.jetbrainsMono(
+                               ^^^^^^^^^^^^^
+lib/main.dart:476:33: Error: Member not found: 'GoogleFonts.jetbrainsMono'.
+                    GoogleFonts.jetbrainsMono(fontSize: 10, color: Colors.grey),
+                                ^^^^^^^^^^^^^
+Target kernel_snapshot_program failed: Exception
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildRelease'.
+> Process 'command 'D:\Tools\flutter\bin\flutter.bat'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 7s
+Running Gradle task 'assembleRelease'...                            7.3s
+Gradle task assembleRelease failed with exit code 1

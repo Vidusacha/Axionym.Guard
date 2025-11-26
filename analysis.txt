@@ -1,0 +1,15 @@
+Analyzing Axionym.Guard...                                      
+
+  error - The method 'jetbrainsMonoTextTheme' isn't defined for the type 'GoogleFonts' - lib\main.dart:28:32 - undefined_method
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:139:50 - deprecated_member_use
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:147:36 - undefined_method
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:192:25 - undefined_method
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:202:51 - deprecated_member_use
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:246:32 - undefined_method
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:291:32 - undefined_method
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:343:36 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\main.dart:344:34 - deprecated_member_use
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:362:40 - undefined_method
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:385:28 - undefined_method
+  error - The method 'jetbrainsMono' isn't defined for the type 'GoogleFonts' - lib\main.dart:399:28 - undefined_method
+

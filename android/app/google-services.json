@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "690674574788",
+    "project_id": "axionym-guard",
+    "storage_bucket": "axionym-guard.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:690674574788:android:22b5cc487b2366565ab091",
+        "android_client_info": {
+          "package_name": "com.example.axionym_guard"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC5ySabz08n3kLF9f9KJApRoum3P9RpSdQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
