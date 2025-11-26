@@ -6,13 +6,22 @@ import 'package:fl_chart/fl_chart.dart';
 // Firebase Imports
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Fixed: Updated to new API parameter names (providerAndroid / providerApple)
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: AndroidProvider.debug,
+    appleProvider: AppleProvider.debug,
+  );
+
   runApp(const AxionymApp());
 }
 
@@ -102,6 +111,50 @@ class _LogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+// --- HELPER: CUSTOM SNACKBAR ---
+// This creates a consistent "Tech" look for all notifications
+void showAxionymSnackBar(BuildContext context,
+    {required String message, required bool isError}) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Row(
+        children: [
+          Icon(
+            isError ? LucideIcons.alertTriangle : LucideIcons.checkCircle,
+            color: isError
+                ? const Color(0xFFEF4444)
+                : const Color(0xFF10B981), // Red vs Emerald Green
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.robotoMono(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: const Color(0xFF0F172A), // Slate-900 (Dark)
+      behavior: SnackBarBehavior.floating, // Floats above bottom
+      margin: const EdgeInsets.all(16), // Space around
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isError
+              ? const Color(0xFFEF4444)
+              : const Color(0xFF10B981), // Colored Border
+          width: 1,
+        ),
+      ),
+      duration: const Duration(seconds: 4),
+    ),
+  );
+}
+
 // --- LAYOUT & NAVIGATION ---
 
 class MainLayout extends StatefulWidget {
@@ -146,9 +199,8 @@ class _MainLayoutState extends State<MainLayout> {
                   TextSpan(
                       text: '.GUARD',
                       style: TextStyle(color: Color(0xFF06B6D4))),
-                  // UPDATED: Added Version Number
                   TextSpan(
-                      text: ' v2',
+                      text: ' v2.0',
                       style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
                 ],
               ),
@@ -158,7 +210,12 @@ class _MainLayoutState extends State<MainLayout> {
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.bell, color: Color(0xFF94A3B8)),
-            onPressed: () {},
+            onPressed: () {
+              // Example of the new SnackBar design
+              showAxionymSnackBar(context,
+                  message: 'System Active. Monitoring enabled.',
+                  isError: false);
+            },
           ),
         ],
         bottom: PreferredSize(
@@ -183,7 +240,6 @@ class _MainLayoutState extends State<MainLayout> {
                 icon: Icon(LucideIcons.clipboardCheck), label: 'CHECKUP'),
             NavigationDestination(
                 icon: Icon(LucideIcons.search), label: 'SCAN'),
-            // UPDATED: Changed icon to Radar
             NavigationDestination(
                 icon: Icon(LucideIcons.radar), label: 'RADAR'),
             NavigationDestination(
@@ -310,7 +366,6 @@ class _SafetyCheckupTabState extends State<SafetyCheckupTab> {
           .orderBy('order')
           .snapshots(),
       builder: (context, snapshot) {
-        // Fixed: Added braces around single-line if
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
@@ -550,7 +605,6 @@ class RadarTab extends StatelessWidget {
           .orderBy('timestamp', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        // Fixed: Added braces around single-line if
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
@@ -780,17 +834,14 @@ class _ReportTabState extends State<ReportTab> {
       }
 
       _controller.clear();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Report encrypted & uploaded to Axionym Core.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+
+      // UPDATED: Using custom Design
+      showAxionymSnackBar(context,
+          message: 'ENCRYPTED REPORT UPLOADED TO CORE.', isError: false);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Upload failed: $e'), backgroundColor: Colors.red),
-      );
+      // UPDATED: Using custom Design
+      showAxionymSnackBar(context,
+          message: 'UPLOAD FAILED. CHECK CONNECTION.', isError: true);
     } finally {
       if (mounted) {
         setState(() => _isSending = false);
