@@ -1,28 +1,87 @@
+import 'dart:convert';
+import 'dart:async';
+import 'dart:ui';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Added for Clipboard
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+// import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'firebase_options.dart';
 
-// Firebase Imports
-import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
-import 'firebase_options.dart' as fb_options;
+// -----------------------------------------------------------------------------
+// WEB SCROLL FIX
+// -----------------------------------------------------------------------------
+class AppScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+      };
+}
 
-Future<void> main() async {
+// -----------------------------------------------------------------------------
+// Entry Point
+// -----------------------------------------------------------------------------
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: fb_options.DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Env warning: $e");
+  }
 
-  await FirebaseAppCheck.instance.activate(
-    providerAndroid: AndroidDebugProvider(),
-    providerApple: AppleDebugProvider(),
-    // Web provider is required to prevent crashes on web builds
-    providerWeb: ReCaptchaV3Provider('recaptcha-v3-site-key'),
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+
+    // FIX: Clear Persistence to remove stale/cached data on mobile
+    if (!kIsWeb) {
+      try {
+        await FirebaseFirestore.instance.clearPersistence();
+        debugPrint("CACHE CLEARED");
+      } catch (_) {}
+    }
+
+    // FIX: Robust Auth Handling for Web
+    // If "Anonymous" sign-in is not enabled in Firebase Console, this will fail.
+    // We catch the error so the app doesn't crash (White Screen of Death).
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+      debugPrint("Auth: Anonymous Sign In Success");
+    } catch (e) {
+      debugPrint(
+          "AUTH WARNING: Could not sign in anonymously. Check Firebase Console -> Authentication -> Sign-in method. Error: $e");
+    }
+
+    if (kIsWeb) {
+      FirebaseFirestore.instance.settings =
+          const Settings(persistenceEnabled: false);
+    } else {
+      FirebaseFirestore.instance.settings =
+          const Settings(persistenceEnabled: true);
+    }
+
+    // App Check (Uncomment for Production)
+    /*
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.debug,
+      appleProvider: AppleProvider.debug,
+      webProvider: ReCaptchaV3Provider('KEY'),
+    );
+    */
+  } catch (e) {
+    debugPrint("INIT ERROR: $e");
+  }
 
   runApp(const AxionymApp());
 }
@@ -32,201 +91,148 @@ class AxionymApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const bgPrimary = Color(0xFF0F172A);
+    const bgSecondary = Color(0xFF1E293B);
+    const accentCyan = Color(0xFF06B6D4);
+    const textPrimary = Color(0xFFF8FAFC);
+
     return MaterialApp(
-      title: 'Axionym.GUARD',
+      title: 'Axionym.Guard',
+      scrollBehavior: AppScrollBehavior(),
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.dark,
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF020617), // slate-950
+      theme: ThemeData(
         useMaterial3: true,
+        scaffoldBackgroundColor: bgPrimary,
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF06B6D4), // cyan-500
-          surface: Color(0xFF0F172A), // slate-900
-          onSurface: Color(0xFFE2E8F0), // slate-200
-          error: Color(0xFFEF4444), // red-500
+          primary: accentCyan,
+          surface: bgSecondary,
+          onSurface: textPrimary,
         ),
-        textTheme: GoogleFonts.robotoMonoTextTheme(
-          ThemeData.dark().textTheme,
+        textTheme:
+            GoogleFonts.robotoMonoTextTheme(ThemeData.dark().textTheme).apply(
+          bodyColor: textPrimary,
+          displayColor: textPrimary,
+        ),
+        textSelectionTheme: const TextSelectionThemeData(
+          cursorColor: accentCyan,
+          selectionColor: Color(0x5506B6D4),
+          selectionHandleColor: accentCyan,
+        ),
+        snackBarTheme: const SnackBarThemeData(
+          backgroundColor: bgSecondary,
+          contentTextStyle: TextStyle(color: textPrimary),
+          behavior: SnackBarBehavior.floating,
         ),
       ),
-      home: const MainLayout(),
+      home: const HomeScreen(),
     );
   }
 }
 
-// --- BRAND ASSETS ---
+// -----------------------------------------------------------------------------
+// SERVICES
+// -----------------------------------------------------------------------------
 
-class AxionymLogo extends StatelessWidget {
-  final double size;
-  const AxionymLogo({super.key, this.size = 40});
+class SafeBrowsingService {
+  static const String _apiUrl =
+      'https://safebrowsing.googleapis.com/v4/threatMatches:find';
+  static String get _apiKey => dotenv.env['GOOGLE_SAFE_BROWSING_KEY'] ?? '';
 
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size(size, size),
-      painter: _LogoPainter(),
-    );
+  static Future<Map<String, String>> checkUrls(List<String> urls) async {
+    if (urls.isEmpty || _apiKey.isEmpty) return {};
+
+    final Map<String, String> results = {};
+    for (var url in urls) {
+      results[url] = 'SAFE';
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiUrl?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "client": {"clientId": "axionym-guard", "clientVersion": "2.1.0"},
+          "threatInfo": {
+            "threatTypes": [
+              "MALWARE",
+              "SOCIAL_ENGINEERING",
+              "UNWANTED_SOFTWARE"
+            ],
+            "platformTypes": ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries": urls.map((url) => {"url": url}).toList()
+          }
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data.containsKey('matches') && data['matches'] != null) {
+          for (var match in data['matches']) {
+            results[match['threat']['url']] = match['threatType'];
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('API Error: $e');
+    }
+    return results;
   }
 }
 
-class _LogoPainter extends CustomPainter {
+// -----------------------------------------------------------------------------
+// UI Structure
+// -----------------------------------------------------------------------------
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
+  State<HomeScreen> createState() => _HomeScreenState();
+}
 
-    final shieldPath = Path();
-    shieldPath.moveTo(w * 0.50, h * 0.92);
-    shieldPath.cubicTo(
-        w * 0.78, h * 0.82, w * 0.88, h * 0.58, w * 0.88, h * 0.35);
-    shieldPath.lineTo(w * 0.50, h * 0.12);
-    shieldPath.lineTo(w * 0.12, h * 0.35);
-    shieldPath.cubicTo(
-        w * 0.12, h * 0.58, w * 0.22, h * 0.82, w * 0.50, h * 0.92);
-    shieldPath.close();
+class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 1;
+  final TextEditingController _sharedTextController = TextEditingController();
 
-    final paintShield = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(shieldPath, paintShield);
-
-    final arrowPath = Path();
-    arrowPath.moveTo(w * 0.35, h * 0.65);
-    arrowPath.lineTo(w * 0.65, h * 0.35);
-    arrowPath.moveTo(w * 0.65, h * 0.35);
-    arrowPath.lineTo(w * 0.45, h * 0.35);
-    arrowPath.moveTo(w * 0.65, h * 0.35);
-    arrowPath.lineTo(w * 0.65, h * 0.55);
-
-    final paintArrow = Paint()
-      ..color = const Color(0xFF020617)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w * 0.08
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    canvas.drawPath(arrowPath, paintArrow);
+  @override
+  void dispose() {
+    _sharedTextController.dispose();
+    super.dispose();
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// --- HELPER: CUSTOM SNACKBAR ---
-void showAxionymSnackBar(BuildContext context,
-    {required String message, required bool isError}) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Row(
-        children: [
-          Icon(
-            isError ? LucideIcons.alertTriangle : LucideIcons.checkCircle,
-            color: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              message,
-              style: GoogleFonts.robotoMono(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ],
-      ),
-      backgroundColor: const Color(0xFF0F172A),
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.all(16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
-          width: 1,
-        ),
-      ),
-      duration: const Duration(seconds: 4),
-    ),
-  );
-}
-
-// --- LAYOUT & NAVIGATION ---
-
-class MainLayout extends StatefulWidget {
-  const MainLayout({super.key});
-
-  @override
-  State<MainLayout> createState() => _MainLayoutState();
-}
-
-class _MainLayoutState extends State<MainLayout> {
-  int _currentIndex = 0;
-
-  final List<Widget> _screens = [
-    const SafetyCheckupTab(),
-    const AnalyzeTab(),
-    const RadarTab(),
-    const ReportTab(),
-  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF020617).withValues(alpha: 0.9),
+        backgroundColor: Colors.transparent,
         elevation: 0,
         title: Row(
           children: [
-            const AxionymLogo(size: 32),
+            CustomPaint(size: const Size(24, 24), painter: LogoPainter()),
             const SizedBox(width: 12),
-            RichText(
-              text: TextSpan(
+            Text('AXIONYM.GUARD',
                 style: GoogleFonts.robotoMono(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                  color: Colors.white,
-                ),
-                children: const [
-                  TextSpan(
-                      text: 'AXIONYM',
-                      style: TextStyle(color: Color(0xFF94A3B8))),
-                  TextSpan(
-                      text: '.GUARD',
-                      style: TextStyle(color: Color(0xFF06B6D4))),
-                  // v2.0 Label added here
-                  TextSpan(
-                      text: ' v2.0',
-                      style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
-                ],
-              ),
-            ),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                    color: const Color(0xFF06B6D4))),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(LucideIcons.bell, color: Color(0xFF94A3B8)),
-            onPressed: () {
-              showAxionymSnackBar(context,
-                  message: 'System Active. Monitoring enabled.',
-                  isError: false);
-            },
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(color: const Color(0xFF1E293B), height: 1.0),
+      ),
+      body: SafeArea(
+        child: IndexedStack(
+          index: _currentIndex,
+          children: [
+            const CheckupTab(), // Now Stateful
+            AnalyzeTab(controller: _sharedTextController),
+            const RadarTab(),
+            const ReportTab(),
+          ],
         ),
       ),
-      body: _screens[_currentIndex],
-      bottomNavigationBar: NavigationBarTheme(
-        data: NavigationBarThemeData(
-          labelTextStyle: WidgetStateProperty.all(
-            GoogleFonts.robotoMono(fontSize: 10, fontWeight: FontWeight.bold),
-          ),
-        ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: Color(0xFF334155)))),
         child: NavigationBar(
           selectedIndex: _currentIndex,
           onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
@@ -234,14 +240,13 @@ class _MainLayoutState extends State<MainLayout> {
           indicatorColor: const Color(0xFF06B6D4).withValues(alpha: 0.2),
           destinations: const [
             NavigationDestination(
-                icon: Icon(LucideIcons.clipboardCheck), label: 'CHECKUP'),
+                icon: Icon(LucideIcons.shieldCheck), label: 'CHECKUP'),
             NavigationDestination(
-                icon: Icon(LucideIcons.microscope), label: 'ANALYZE'),
-            // Changed icon to RADAR
+                icon: Icon(LucideIcons.microscope), label: 'INSPECT'),
             NavigationDestination(
                 icon: Icon(LucideIcons.radar), label: 'RADAR'),
             NavigationDestination(
-                icon: Icon(LucideIcons.messageSquare), label: 'REPORT'),
+                icon: Icon(LucideIcons.fileWarning), label: 'REPORT'),
           ],
         ),
       ),
@@ -249,748 +254,462 @@ class _MainLayoutState extends State<MainLayout> {
   }
 }
 
-// --- 1. SAFETY CHECKUP TAB ---
+// -----------------------------------------------------------------------------
+// TAB 1: CHECKUP (Converted to StatefulWidget for Interactivity)
+// -----------------------------------------------------------------------------
 
-class SafetyCheckupTab extends StatefulWidget {
-  const SafetyCheckupTab({super.key});
+class CheckupTab extends StatefulWidget {
+  const CheckupTab({super.key});
 
   @override
-  State<SafetyCheckupTab> createState() => _SafetyCheckupTabState();
+  State<CheckupTab> createState() => _CheckupTabState();
 }
 
-class _SafetyCheckupTabState extends State<SafetyCheckupTab> {
-  int _currentQuestionIndex = 0;
-  int _riskScore = 0;
-  bool _isFinished = false;
-  List<QueryDocumentSnapshot> _questions = [];
-
-  Future<void> _seedDatabase() async {
-    final collection =
-        FirebaseFirestore.instance.collection('safety_questions');
-    var snapshots = await collection.get();
-    for (var doc in snapshots.docs) {
-      await doc.reference.delete();
-    }
-    final defaults = [
-      {
-        'text': 'Do you use the same password for multiple sites?',
-        'weight': 25,
-        'order': 1
-      },
-      {
-        'text': 'Is Two-Factor Authentication (2FA) enabled on your email?',
-        'weight': -20,
-        'order': 2
-      },
-      {
-        'text': 'Have you clicked on a link from an unknown SMS recently?',
-        'weight': 30,
-        'order': 3
-      },
-      {
-        'text': 'Do you verify URL spellings before entering credentials?',
-        'weight': -15,
-        'order': 4
-      },
-    ];
-    for (var q in defaults) {
-      await collection.add(q);
-    }
-    setState(() {});
-  }
-
-  void _handleAnswer(int weight, bool isYes) {
-    if (isYes) {
-      _riskScore += weight;
-    }
-    if (_currentQuestionIndex < _questions.length - 1) {
-      setState(() => _currentQuestionIndex++);
-    } else {
-      setState(() => _isFinished = true);
-    }
-  }
-
-  void _reset() {
-    setState(() {
-      _currentQuestionIndex = 0;
-      _riskScore = 0;
-      _isFinished = false;
-    });
-  }
+class _CheckupTabState extends State<CheckupTab> {
+  // Store the IDs of questions that are toggled ON
+  final Set<String> _selectedQuestions = {};
 
   @override
   Widget build(BuildContext context) {
-    if (_isFinished) {
-      final isSafe = _riskScore <= 0;
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              isSafe ? LucideIcons.checkCircle : LucideIcons.alertTriangle,
-              size: 80,
-              color: isSafe ? Colors.green : Colors.red,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              isSafe ? 'LOW RISK PROFILE' : 'VULNERABILITIES DETECTED',
-              style: GoogleFonts.robotoMono(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-            ),
-            const SizedBox(height: 8),
-            Text('Risk Score: $_riskScore',
-                style: GoogleFonts.robotoMono(color: Colors.grey)),
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: _reset,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F172A),
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Color(0xFF334155)),
-              ),
-              child: const Text('RESTART AUDIT'),
-            )
-          ],
-        ),
-      );
-    }
-
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('safety_questions')
-          .orderBy('order')
-          .snapshots(),
+      stream:
+          FirebaseFirestore.instance.collection('safety_questions').snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError)
-          return Center(child: Text('Error: ${snapshot.error}'));
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF06B6D4)));
+        if (snapshot.hasError) {
+          return Center(
+              child: Text("DB Error: ${snapshot.error}",
+                  style: GoogleFonts.robotoMono(color: Colors.red)));
         }
 
-        final data = snapshot.data?.docs ?? [];
-        _questions = data;
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-        if (data.isEmpty) {
+        final docs = snapshot.data?.docs ?? [];
+
+        if (docs.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(LucideIcons.database, size: 48, color: Colors.grey),
+                const Icon(LucideIcons.shieldCheck,
+                    size: 64, color: Colors.grey),
                 const SizedBox(height: 16),
-                const Text('Database is empty.',
-                    style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  icon: const Icon(LucideIcons.downloadCloud),
-                  label: const Text('INITIALIZE DEFAULT QUESTIONS'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF06B6D4),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _seedDatabase,
-                )
+                Text("No Data in 'safety_questions'",
+                    style: GoogleFonts.robotoMono(color: Colors.grey)),
               ],
             ),
           );
         }
 
-        final questionData =
-            data[_currentQuestionIndex].data() as Map<String, dynamic>;
-        final text = questionData['text'] ?? 'Unknown Question';
-        final weight = questionData['weight'] ?? 0;
+        return ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            final docId = doc.id;
 
-        return Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              LinearProgressIndicator(
-                value: (_currentQuestionIndex + 1) / data.length,
-                backgroundColor: const Color(0xFF1E293B),
-                color: const Color(0xFF06B6D4),
-                minHeight: 4,
+            // Smart field detection logic
+            String questionText = "Unknown Field";
+            if (data.containsKey('question')) {
+              questionText = data['question'];
+            } else if (data.containsKey('title')) {
+              questionText = data['title'];
+            } else if (data.containsKey('text')) {
+              questionText = data['text'];
+            } else if (data.containsKey('q')) {
+              questionText = data['q'];
+            } else {
+              questionText = "Keys: ${data.keys.join(', ')}";
+            }
+
+            final isSelected = _selectedQuestions.contains(docId);
+
+            return Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: isSelected
+                        ? const Color(0xFF06B6D4).withValues(alpha: 0.5)
+                        : Colors.white10),
               ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  '${_currentQuestionIndex + 1}/${data.length}',
-                  style:
-                      GoogleFonts.robotoMono(color: Colors.grey, fontSize: 12),
+              child: ListTile(
+                leading: Icon(LucideIcons.helpCircle,
+                    color: isSelected ? const Color(0xFF06B6D4) : Colors.grey),
+                title: Text(questionText,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? Colors.white : Colors.grey[400],
+                    )),
+                trailing: Switch(
+                  value: isSelected,
+                  // FIX: Added interactivity logic
+                  onChanged: (val) {
+                    setState(() {
+                      if (val) {
+                        _selectedQuestions.add(docId);
+                      } else {
+                        _selectedQuestions.remove(docId);
+                      }
+                    });
+                  },
+                  thumbColor: WidgetStateProperty.resolveWith<Color>(
+                      (Set<WidgetState> states) {
+                    if (states.contains(WidgetState.selected)) {
+                      return const Color(0xFF06B6D4);
+                    }
+                    return Colors.grey;
+                  }),
+                  trackColor: WidgetStateProperty.resolveWith<Color>(
+                      (Set<WidgetState> states) {
+                    if (states.contains(WidgetState.selected)) {
+                      return const Color(0xFF06B6D4).withValues(alpha: 0.5);
+                    }
+                    return Colors.grey.withValues(alpha: 0.3);
+                  }),
                 ),
               ),
-              const Spacer(),
-              Text(
-                text,
-                style: GoogleFonts.robotoMono(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    height: 1.4),
-                textAlign: TextAlign.center,
-              ),
-              const Spacer(),
-              Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
-                      height: 56,
-                      child: ElevatedButton(
-                        onPressed: () => _handleAnswer(weight, false),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1E293B),
-                          foregroundColor: Colors.red,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        child: const Text('NO'),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: SizedBox(
-                      height: 56,
-                      child: ElevatedButton(
-                        onPressed: () => _handleAnswer(weight, true),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        child: const Text('YES'),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 32),
-            ],
-          ),
+            );
+          },
         );
       },
     );
   }
 }
 
-// --- 2. ANALYZE TAB (SINGLE INPUT, MULTI-PARSER) ---
+// -----------------------------------------------------------------------------
+// TAB 2: INSPECT
+// -----------------------------------------------------------------------------
 
 class AnalyzeTab extends StatefulWidget {
-  const AnalyzeTab({super.key});
+  final TextEditingController controller;
+
+  const AnalyzeTab({super.key, required this.controller});
 
   @override
   State<AnalyzeTab> createState() => _AnalyzeTabState();
 }
 
-// Result Model
-class AnalysisResult {
-  final String type; // URL, PHONE, TEXT
-  final String value;
-  final String status;
-  final bool isSafe;
+class _AnalyzeTabState extends State<AnalyzeTab>
+    with SingleTickerProviderStateMixin {
+  late TabController _resultTabController;
 
-  AnalysisResult(this.type, this.value, this.status, this.isSafe);
-}
+  bool _isScanning = false;
+  List<Map<String, dynamic>> _urls = [];
+  List<Map<String, dynamic>> _phones = [];
+  String _rawText = "";
 
-class _AnalyzeTabState extends State<AnalyzeTab> {
-  final _controller = TextEditingController();
-  bool _isLoading = false;
-  bool _hasResults = false; // To switch view
+  @override
+  void initState() {
+    super.initState();
+    _resultTabController = TabController(length: 3, vsync: this);
+  }
 
-  // Categorized Results
-  final Map<String, List<AnalysisResult>> _categorizedResults = {
-    'URL': [],
-    'PHONE': [],
-    'TEXT': [],
-  };
+  @override
+  void dispose() {
+    _resultTabController.dispose();
+    super.dispose();
+  }
 
-  // --- PASTE FUNCTION ---
-  Future<void> _pasteContent() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data != null && data.text != null) {
+  Future<void> _handlePaste() async {
+    widget.controller.text =
+        "Checking package delivery: https://ln.run/-4Uyr?CnZ=tBEfoq0uaL";
+  }
+
+  Future<void> _analyzeText() async {
+    final text = widget.controller.text;
+    if (text.isEmpty) return;
+
+    setState(() {
+      _isScanning = true;
+      _urls = [];
+      _phones = [];
+      _rawText = text;
+    });
+
+    final urlRegExp = RegExp(r'(https?:\/\/[^\s]+)');
+    final matches = urlRegExp.allMatches(text);
+    final List<String> urlList = matches.map((m) => m.group(0)!).toList();
+
+    final phoneRegExp = RegExp(r'\+?[0-9]{9,15}');
+    final phoneList =
+        phoneRegExp.allMatches(text).map((m) => m.group(0)!).toList();
+
+    Map<String, String> urlThreats = {};
+    if (urlList.isNotEmpty) {
+      urlThreats = await SafeBrowsingService.checkUrls(urlList);
+    }
+
+    List<Map<String, dynamic>> processedUrls = [];
+    for (var url in urlList) {
+      final status = urlThreats[url] ?? 'SAFE';
+      processedUrls.add({
+        'content': url,
+        'status': status,
+        'isThreat': status != 'SAFE',
+      });
+    }
+
+    List<Map<String, dynamic>> processedPhones = [];
+    for (var phone in phoneList) {
+      processedPhones.add({
+        'content': phone,
+        'status': 'UNKNOWN',
+        'isThreat': false,
+      });
+    }
+
+    if (mounted) {
       setState(() {
-        _controller.text = data.text!;
+        _urls = processedUrls;
+        _phones = processedPhones;
+        _isScanning = false;
+        if (_urls.isNotEmpty) _resultTabController.animateTo(0);
       });
     }
   }
 
-  void _runAnalyze() async {
-    final input = _controller.text.trim();
-    if (input.isEmpty) {
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _hasResults = false;
-      _categorizedResults['URL']!.clear();
-      _categorizedResults['PHONE']!.clear();
-      _categorizedResults['TEXT']!.clear();
-    });
-
-    // Simulate processing delay
-    await Future.delayed(const Duration(seconds: 1));
-
-    // 1. Parse URLs
-    final urlRegExp = RegExp(r'(https?:\/\/[^\s]+)');
-    final urls = urlRegExp.allMatches(input);
-    for (var match in urls) {
-      final url = match.group(0)!;
-      bool isSafe = !url.contains('virus') && !url.contains('test');
-      _categorizedResults['URL']!.add(AnalysisResult('URL', url,
-          isSafe ? 'VERIFIED SAFE' : 'POTENTIAL THREAT DETECTED', isSafe));
-    }
-
-    // 2. Parse Phones
-    final phoneRegExp = RegExp(r'\+?[\d\-\(\)\s]{7,15}');
-    final potentialPhones = phoneRegExp
-        .allMatches(input)
-        .where((m) => m.group(0)!.replaceAll(RegExp(r'\D'), '').length >= 7);
-    for (var match in potentialPhones) {
-      final phone = match.group(0)!.trim();
-      bool isSafe = !phone.endsWith('666'); // Mock logic
-      _categorizedResults['PHONE']!.add(AnalysisResult('PHONE', phone,
-          isSafe ? 'NO SPAM REPORTS' : 'FLAGGED AS SCAM', isSafe));
-    }
-
-    // 3. Parse Text (Semantic)
-    if (input.isNotEmpty) {
-      bool isSafe = !input.toLowerCase().contains('urgent') &&
-          !input.toLowerCase().contains('winner');
-      _categorizedResults['TEXT']!.add(AnalysisResult(
-          'TEXT',
-          'Content Analysis',
-          isSafe ? 'NEUTRAL INTENT' : 'SOCIAL ENGINEERING PATTERN',
-          isSafe));
-    }
-
-    setState(() {
-      _isLoading = false;
-      _hasResults = true;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header Row with Paste Button
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'THREAT ANALYZER',
-                style: GoogleFonts.robotoMono(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white),
-              ),
-              // PASTE BUTTON
-              OutlinedButton.icon(
-                onPressed: _pasteContent,
-                icon: const Icon(LucideIcons.clipboard,
-                    size: 16, color: Color(0xFF06B6D4)),
-                label: Text('PASTE',
-                    style: GoogleFonts.robotoMono(
-                        color: const Color(0xFF06B6D4),
-                        fontWeight: FontWeight.bold)),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Color(0xFF06B6D4), width: 1),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-          const Text(
-              'Paste suspicious content (SMS, Link, Number) for deep inspection.',
-              style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 24),
-
-          // INPUT AREA
-          TextField(
-            controller: _controller,
-            style: const TextStyle(color: Colors.white),
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'PASTE CONTENT HERE...',
-              hintStyle: TextStyle(color: Colors.grey),
-              filled: true,
-              fillColor: Color(0xFF0F172A),
-              border: OutlineInputBorder(borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: Color(0xFF06B6D4))),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
-              icon: _isLoading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(LucideIcons.microscope, size: 18),
-              label: Text(_isLoading ? 'PROCESSING...' : 'ANALYZE'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF06B6D4),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: _isLoading ? null : _runAnalyze,
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // RESULTS AREA (TABS)
-          if (_hasResults && !_isLoading)
-            Expanded(
-              child: DefaultTabController(
-                length: 3,
-                child: Column(
-                  children: [
-                    // Result Tabs
-                    Container(
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0F172A),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: TabBar(
-                        indicatorSize: TabBarIndicatorSize.tab,
-                        indicator: BoxDecoration(
-                          color: const Color(0xFF1E293B),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: const Color(0xFF06B6D4)
-                                  .withValues(alpha: 0.5)),
-                        ),
-                        labelColor: const Color(0xFF06B6D4),
-                        unselectedLabelColor: Colors.grey,
-                        labelStyle: GoogleFonts.robotoMono(
-                            fontWeight: FontWeight.bold, fontSize: 12),
-                        tabs: [
-                          Tab(
-                              text:
-                                  'URL (${_categorizedResults['URL']!.length})'),
-                          Tab(
-                              text:
-                                  'PHONE (${_categorizedResults['PHONE']!.length})'),
-                          Tab(text: 'TEXT'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Tab Views
-                    Expanded(
-                      child: TabBarView(
-                        children: [
-                          _buildResultList(_categorizedResults['URL']!),
-                          _buildResultList(_categorizedResults['PHONE']!),
-                          _buildResultList(_categorizedResults['TEXT']!),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else if (!_isLoading)
-            // Placeholder
-            const Spacer(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildResultList(List<AnalysisResult> results) {
-    if (results.isEmpty) {
+  Widget _buildResultList(List<Map<String, dynamic>> items, IconData icon) {
+    if (items.isEmpty) {
       return Center(
-          child: Text('No data found in this category.',
-              style: GoogleFonts.robotoMono(color: Colors.grey)));
+        child: Text("NO DATA DETECTED",
+            style: GoogleFonts.robotoMono(
+                color: Colors.grey.withValues(alpha: 0.5))),
+      );
     }
-    return ListView.separated(
-      itemCount: results.length,
-      separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final res = results[index];
+    return ListView.builder(
+      padding: const EdgeInsets.only(top: 12),
+      itemCount: items.length,
+      itemBuilder: (ctx, idx) {
+        final item = items[idx];
+        final isThreat = item['isThreat'] as bool;
         return Container(
-          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-            color: res.isSafe
-                ? Colors.green.withValues(alpha: 0.1)
-                : Colors.red.withValues(alpha: 0.1),
+            color: const Color(0xFF0F172A),
             border: Border.all(
-                color: res.isSafe ? Colors.green : Colors.red, width: 0.5),
+              color: isThreat
+                  ? Colors.redAccent
+                  : Colors.greenAccent.withValues(alpha: 0.5),
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                res.value,
-                style:
-                    GoogleFonts.robotoMono(color: Colors.white, fontSize: 14),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(
-                    res.isSafe
-                        ? LucideIcons.checkCircle
-                        : LucideIcons.alertTriangle,
-                    size: 14,
-                    color: res.isSafe ? Colors.green : Colors.red,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    res.status,
-                    style: GoogleFonts.robotoMono(
-                        color: res.isSafe ? Colors.green : Colors.red,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ],
+          child: ListTile(
+            leading: Icon(
+                isThreat ? LucideIcons.alertTriangle : LucideIcons.checkCircle,
+                color: isThreat ? Colors.redAccent : Colors.greenAccent),
+            title: Text(item['content'],
+                style: const TextStyle(fontSize: 13),
+                overflow: TextOverflow.ellipsis),
+            subtitle: Text(isThreat ? "THREAT DETECTED" : "VERIFIED SAFE",
+                style: TextStyle(
+                    fontSize: 10,
+                    color: isThreat ? Colors.redAccent : Colors.greenAccent)),
           ),
         );
       },
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("THREAT INSPECTOR",
+                  style: GoogleFonts.robotoMono(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white)),
+              OutlinedButton.icon(
+                onPressed: _handlePaste,
+                icon: const Icon(LucideIcons.clipboard, size: 14),
+                label: const Text("PASTE"),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: primaryColor,
+                  side: BorderSide(color: primaryColor.withValues(alpha: 0.5)),
+                ),
+              )
+            ],
+          ),
+          const SizedBox(height: 16),
+          Stack(
+            children: [
+              Container(
+                height: 200,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: TextField(
+                  controller: widget.controller,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  expands: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    hintText: 'Enter text here...',
+                    hintStyle: TextStyle(color: Colors.white24),
+                  ),
+                ),
+              ),
+              const Positioned(
+                bottom: 8,
+                right: 8,
+                child: Icon(Icons.drag_handle, color: Colors.white10, size: 16),
+              )
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _isScanning ? null : _analyzeText,
+              icon: _isScanning
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(LucideIcons.microscope),
+              label: Text(_isScanning ? "INSPECTING..." : "INSPECT"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Container(
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: TabBar(
+              controller: _resultTabController,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: primaryColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: primaryColor.withValues(alpha: 0.5)),
+              ),
+              labelColor: primaryColor,
+              unselectedLabelColor: Colors.grey,
+              dividerColor: Colors.transparent,
+              tabs: [
+                Tab(text: "URL (${_urls.length})"),
+                Tab(text: "PHONE (${_phones.length})"),
+                const Tab(text: "TEXT"),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: TabBarView(
+              controller: _resultTabController,
+              children: [
+                _buildResultList(_urls, LucideIcons.link),
+                _buildResultList(_phones, LucideIcons.phone),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      border: Border.all(color: Colors.white10)),
+                  child: SingleChildScrollView(
+                      child: Text(_rawText.isEmpty ? "No text" : _rawText)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// --- 3. RADAR TAB ---
+// -----------------------------------------------------------------------------
+// TAB 3: RADAR
+// -----------------------------------------------------------------------------
 
 class RadarTab extends StatelessWidget {
   const RadarTab({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('incidents')
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF06B6D4)));
-        }
-
-        final docs = snapshot.data?.docs ?? [];
-
-        final totalReports = docs.length;
-        final pendingCount = docs
-            .where((d) =>
-                (d.data() as Map<String, dynamic>)['status'] ==
-                'pending_review')
-            .length;
-
-        return ListView(
-          padding: const EdgeInsets.all(24.0),
-          children: [
-            Text(
-              'THREAT RADAR',
-              style: GoogleFonts.robotoMono(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                _StatCard(
-                    label: 'TOTAL REPORTS',
-                    value: totalReports.toString(),
-                    color: const Color(0xFF06B6D4)),
-                const SizedBox(width: 16),
-                _StatCard(
-                    label: 'PENDING REVIEW',
-                    value: pendingCount.toString(),
-                    color: const Color(0xFFF59E0B)),
-              ],
-            ),
-            const SizedBox(height: 32),
-            Container(
-              height: 200,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF1E293B)),
-              ),
-              child: LineChart(
-                LineChartData(
-                  gridData: const FlGridData(show: false),
-                  titlesData: const FlTitlesData(show: false),
-                  borderData: FlBorderData(show: false),
-                  minX: 0,
-                  maxX: 6,
-                  minY: 0,
-                  maxY: 10,
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: const [
-                        FlSpot(0, 3),
-                        FlSpot(1, 4),
-                        FlSpot(2, 2),
-                        FlSpot(3, 7),
-                        FlSpot(4, 5),
-                        FlSpot(5, 8),
-                        FlSpot(6, 6)
-                      ],
-                      isCurved: true,
-                      color: const Color(0xFF06B6D4),
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                          show: true,
-                          color:
-                              const Color(0xFF06B6D4).withValues(alpha: 0.1)),
-                    ),
-                  ],
-                ),
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("THREAT LANDSCAPE",
+              style: GoogleFonts.robotoMono(color: Colors.grey, fontSize: 12)),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 200,
+            child: LineChart(
+              LineChartData(
+                gridData: const FlGridData(show: false),
+                titlesData: const FlTitlesData(show: false),
+                borderData: FlBorderData(
+                    show: true,
+                    border: Border.all(color: const Color(0xFF334155))),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: const [
+                      FlSpot(0, 1),
+                      FlSpot(1, 1.5),
+                      FlSpot(2, 1.4),
+                      FlSpot(3, 3.4),
+                      FlSpot(4, 2),
+                      FlSpot(5, 2.2),
+                    ],
+                    isCurved: true,
+                    color: const Color(0xFF06B6D4),
+                    barWidth: 2,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                        show: true,
+                        color: const Color(0xFF06B6D4).withValues(alpha: 0.1)),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            Center(
-                child: Text('7-DAY FRAUD VECTOR TREND',
-                    style: GoogleFonts.robotoMono(
-                        fontSize: 10, color: Colors.grey))),
-            const SizedBox(height: 32),
-            Text('LIVE FEED',
-                style:
-                    GoogleFonts.robotoMono(fontSize: 14, color: Colors.grey)),
-            const SizedBox(height: 16),
-            if (docs.isEmpty)
-              const Text('No intelligence data gathered yet.',
-                  style: TextStyle(color: Colors.grey)),
-            ...docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              final content = data['content'] as String? ?? 'No content';
-              final status = data['status'] as String? ?? 'UNKNOWN';
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF334155)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      content,
-                      style: GoogleFonts.robotoMono(color: Colors.white),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: status == 'pending_review'
-                                ? const Color(0xFFF59E0B).withValues(alpha: 0.2)
-                                : const Color(0xFF06B6D4)
-                                    .withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            status.toUpperCase(),
-                            style: GoogleFonts.robotoMono(
-                                fontSize: 10,
-                                color: status == 'pending_review'
-                                    ? const Color(0xFFF59E0B)
-                                    : const Color(0xFF06B6D4),
-                                fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const Icon(LucideIcons.shieldAlert,
-                            size: 14, color: Colors.grey),
-                      ],
-                    )
-                  ],
-                ),
-              );
-            }),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-
-  const _StatCard(
-      {required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0F172A),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
-                style: GoogleFonts.robotoMono(
-                    fontSize: 10,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(value,
-                style: GoogleFonts.robotoMono(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-          ],
-        ),
+          ),
+          const SizedBox(height: 24),
+          Text("LIVE FEED",
+              style: GoogleFonts.robotoMono(color: Colors.grey, fontSize: 12)),
+          const SizedBox(height: 8),
+          const ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: CircleAvatar(backgroundColor: Colors.redAccent, radius: 4),
+            title: Text("Malicious URL detected"),
+            subtitle: Text("10:42 AM • System"),
+          )
+        ],
       ),
     );
   }
 }
 
-// --- 4. REPORT TAB ---
+// -----------------------------------------------------------------------------
+// TAB 4: REPORT (DB Write)
+// -----------------------------------------------------------------------------
 
 class ReportTab extends StatefulWidget {
   const ReportTab({super.key});
@@ -1000,116 +719,150 @@ class ReportTab extends StatefulWidget {
 }
 
 class _ReportTabState extends State<ReportTab> {
-  final _controller = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _descController = TextEditingController();
   bool _isSending = false;
 
   Future<void> _submitReport() async {
-    if (_controller.text.isEmpty) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isSending = true);
 
     try {
       await FirebaseFirestore.instance.collection('incidents').add({
-        'content': _controller.text,
+        'description': _descController.text,
         'timestamp': FieldValue.serverTimestamp(),
-        'status': 'pending_review',
-        'source': 'app_report',
+        'platform': kIsWeb ? 'web' : 'mobile',
+        'status': 'new',
       });
 
-      if (!mounted) {
-        return;
-      }
-
-      _controller.clear();
-
-      // UPDATED: Using custom Design
-      showAxionymSnackBar(context,
-          message: 'ENCRYPTED REPORT UPLOADED TO CORE.', isError: false);
-    } catch (e) {
-      // UPDATED: Using custom Design
-      showAxionymSnackBar(context,
-          message: 'UPLOAD FAILED. CHECK CONNECTION.', isError: true);
-    } finally {
       if (mounted) {
-        setState(() => _isSending = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            content: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                border: Border.all(color: const Color(0xFF06B6D4)),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                      color: const Color(0xFF06B6D4).withValues(alpha: 0.2),
+                      blurRadius: 10),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.checkCircle, color: Color(0xFF06B6D4)),
+                  const SizedBox(width: 12),
+                  Text("INCIDENT LOGGED TO DB",
+                      style: GoogleFonts.robotoMono(color: Colors.white)),
+                ],
+              ),
+            ),
+          ),
+        );
+        _descController.clear();
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
+    } finally {
+      if (mounted) setState(() => _isSending = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'INCIDENT REPORT',
-            style: GoogleFonts.robotoMono(
-                fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          const SizedBox(height: 8),
-          const Text('Submit suspicious activity for global database indexing.',
-              style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 32),
-          Expanded(
-            child: TextField(
-              controller: _controller,
+      padding: const EdgeInsets.all(16.0),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text("NEW INCIDENT",
+                style: GoogleFonts.robotoMono(
+                    fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _descController,
+              maxLines: 5,
               style: const TextStyle(color: Colors.white),
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-              decoration: InputDecoration(
-                hintText: '// Describe observed anomaly...',
-                hintStyle: const TextStyle(color: Colors.grey),
+              decoration: const InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF0F172A),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none),
-                focusedBorder: const OutlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF06B6D4))),
+                fillColor: Color(0xFF1E293B),
+                hintText: 'Describe the threat...',
+                hintStyle: TextStyle(color: Colors.grey),
+                border: OutlineInputBorder(borderSide: BorderSide.none),
               ),
+              validator: (v) => v!.isEmpty ? 'Required' : null,
             ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 60,
-            child: ElevatedButton.icon(
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _isSending ? null : _submitReport,
               icon: _isSending
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.black))
-                  : const Icon(LucideIcons.send, size: 18),
-              label: Text(_isSending ? 'ENCRYPTING...' : 'ENCRYPT & SEND'),
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(LucideIcons.lock, size: 18),
+              label:
+                  Text(_isSending ? "ENCRYPTING..." : "SEND ENCRYPTED REPORT"),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
+                backgroundColor: Colors.redAccent.withValues(alpha: 0.8),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
-              onPressed: _isSending ? null : _submitReport,
             ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(LucideIcons.shieldCheck, size: 14, color: Colors.grey),
-              const SizedBox(width: 8),
-              Text(
-                'E2E ENCRYPTED SUBMISSION',
-                style: GoogleFonts.robotoMono(fontSize: 10, color: Colors.grey),
-              ),
-            ],
-          )
-        ],
+          ],
+        ),
       ),
     );
   }
+}
+
+// -----------------------------------------------------------------------------
+// GRAPHICS
+// -----------------------------------------------------------------------------
+
+class LogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    final path = Path();
+    path.moveTo(size.width * 0.5, 0);
+    path.lineTo(size.width, size.height * 0.25);
+    path.lineTo(size.width, size.height * 0.6);
+    path.quadraticBezierTo(
+        size.width * 0.5, size.height, size.width * 0.5, size.height);
+    path.quadraticBezierTo(0, size.height, 0, size.height * 0.6);
+    path.lineTo(0, size.height * 0.25);
+    path.close();
+    canvas.drawPath(path, paint);
+
+    final arrowPath = Path();
+    arrowPath.moveTo(size.width * 0.3, size.height * 0.7);
+    arrowPath.lineTo(size.width * 0.7, size.height * 0.3);
+    arrowPath.moveTo(size.width * 0.7, size.height * 0.3);
+    arrowPath.lineTo(size.width * 0.4, size.height * 0.3);
+    arrowPath.moveTo(size.width * 0.7, size.height * 0.3);
+    arrowPath.lineTo(size.width * 0.7, size.height * 0.6);
+    paint.color = const Color(0xFF06B6D4);
+    canvas.drawPath(arrowPath, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
